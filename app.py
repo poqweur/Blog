@@ -3,6 +3,7 @@ import logging;logging.basicConfig(level=logging.DEBUG)
 #设置日志
 import asyncio,os,json,time
 from datetime import datetime
+# aiomysql为MySQL数据库提供了异步IO的驱动。
 import aiomysql
 
 
