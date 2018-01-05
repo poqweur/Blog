@@ -72,7 +72,7 @@ class Field(object):
 #创建string字段
 class StringField(Field):
     def __init__(self,name=None,primary_key=False, default=None,dll='varchar(100)'):
-        super.__init__(name,dll,primary_key,default)
+        super().__init__(name,dll,primary_key,default)
 
 class BooleanField(Field):
     def __init__(self,name=None,default=False):
@@ -84,11 +84,11 @@ class IntegerField(Field):
 
 class FloatField(Field):
     def __init__(self,name=None,primary_key=False,default=0.0):
-        super.__init__(name,'real',primary_key,default)
+        super().__init__(name,'real',primary_key,default)
 
 class TextField(Field):
     def __init__(self,name=None,default=None):
-        super.__init__(name,'text',False,default)
+        super().__init__(name,'text',False,default)
 #创建拥有几个占位符的字符串
 def create_args_string(num):
     L = []
@@ -119,6 +119,7 @@ class ModelMetaclass(type):
                         raise RuntimeError('Duplicate primary key for field:%s' % k)
                     primaryKey = k
                 else:
+                    #保存非主键的列
                     fields.append(k)
         if not primaryKey:
             raise RuntimeError('Primary key not found.')
@@ -164,7 +165,7 @@ class Model(dict, metaclass=ModelMetaclass):
                 logging.debug('using default value for %s:%s' % (key, str(value)))
                 setattr(self, key, value)
         return value
-
+    # 主键查找的方法
     @classmethod
     async def find(cls,pk):
         ' find object by primary key'
@@ -217,17 +218,14 @@ class Model(dict, metaclass=ModelMetaclass):
         rs = await select(' '.join(sql), args)
         return [cls(**r) for r in rs]
 
-    # 主键查找的方法
-    @classmethod
-    async def find(cls, pk):
-        ' find object by primary key. '
-        rs = await select('%s where `%s`=?' % (cls.__select__, cls.__primary_key__), [pk], 1)
-        if len(rs) == 0:
-            return None
-        return cls(**rs[0])
+
 
 if __name__ == '__main__':
+    import sys
     loop=asyncio.get_event_loop()
     loop.run_until_complete(create_pool(host='127.0.0.1',port=3306,user='root',password='mysql',db='ORM',loop=loop))
     rs=loop.run_until_complete(select('select * from firstschool',None))
     print('%s'%rs)
+    loop.close()
+    if loop.is_closed():
+        sys.exit(0)
