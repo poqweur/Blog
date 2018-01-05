@@ -2,7 +2,7 @@ import asyncio
 import aiomysql
 import logging
 
-def log(sql,args):
+def log(sql,args=()):
     logging.info('SQL: %s'%sql)
 
 #创建数据库链接对象
@@ -12,9 +12,9 @@ async def create_pool(loop,**kwargs):
     __pool = await aiomysql.create_pool(
         host=kwargs.get('host','localhost'),
         port=kwargs.get('port',3306),
-        user=kwargs['root'],
-        password=kwargs['mysql'],
-        db=kwargs['ORM'],
+        user=kwargs['user'],
+        password=kwargs['password'],
+        db=kwargs['db'],
         charset=kwargs.get('charset','utf8'),
         autocommit=kwargs.get('autocommit',True),
         loop=loop
@@ -27,8 +27,8 @@ async def select(sql,args,size=None):
     with await __pool as conn:
         #创建操作数据库的光标,返回字典格式
         cur = await conn.cursor(aiomysql.DictCursor)
-        #执行一条sql语句的时候将字符中的？替换成%s,excute方法可以防止sql注入
-        await cur.excute(sql.replace('?','%s'),args or ())
+        #执行一条sql语句的时候将字符中的？替换成%s,execute方法可以防止sql注入
+        await cur.execute(sql.replace('?','%s'),args or ())
         if size:
             #如果传入size参数查看指定个数数据
             rs = await cur.fetchmany(size)
@@ -46,7 +46,7 @@ async def execute(sql,args):
     with await __pool as conn:
         try:
             cur = await conn.cursor()
-            await cur.excute(sql.replace('?','%s'),args)
+            await cur.execute(sql.replace('?','%s'),args)
             #返回结果数
             affected = cur.rowcount
             await cur.close()
@@ -54,7 +54,7 @@ async def execute(sql,args):
             raise
         return affected
 
-#定义字段类的基类
+#该类是为了保存数据库列名和类型的基类
 class Field(object):
     def __init__(self, name, column_type, primary_key, default):
         #字段名
@@ -71,8 +71,30 @@ class Field(object):
 
 #创建string字段
 class StringField(Field):
-    def __init__(self,name=None,primary_key=False, default=None,ddl='varchar(100)'):
+    def __init__(self,name=None,primary_key=False, default=None,dll='varchar(100)'):
         super.__init__(name,dll,primary_key,default)
+
+class BooleanField(Field):
+    def __init__(self,name=None,default=False):
+        super().__init__(name,'boolean',False,default)
+
+class IntegerField(Field):
+    def __init__(self,name=None,primary_key=False,default=0):
+        super().__init__(name,'bigint',primary_key,default)
+
+class FloatField(Field):
+    def __init__(self,name=None,primary_key=False,default=0.0):
+        super.__init__(name,'real',primary_key,default)
+
+class TextField(Field):
+    def __init__(self,name=None,default=None):
+        super.__init__(name,'text',False,default)
+#创建拥有几个占位符的字符串
+def create_args_string(num):
+    L = []
+    for n in range(num):
+        L.append('?')
+    return ', '.join(L)
 
 # 定义元类
 class ModelMetaclass(type):
@@ -157,3 +179,55 @@ class Model(dict, metaclass=ModelMetaclass):
         rows=await execute(self.__insert__,args)
         if rows != 1:
             logging.warn('failed to insert record: affected rows: %s'%rows)
+        await self.destory_poll()
+
+    #销毁连接池
+    async def destory_poll(self):
+        global pool
+        if pool is not None:
+            pool.close()
+            await pool.wait_closed()
+
+    # 新的语法  @classmethod装饰器用于把类里面定义的方法声明为该类的类方法
+    @classmethod
+    # 获取表里符合条件的所有数据,类方法的第一个参数为该类名
+    async def findAll(cls, where=None, args=None, **kw):
+        ' find objects by where clause. '
+        sql = [cls.__select__]
+        if where:
+            sql.append('where')
+            sql.append(where)
+        if args is None:
+            args = []
+        orderBy = kw.get('orderBy', None)
+        if orderBy:
+            sql.append('order by')
+            sql.append(orderBy)
+        limit = kw.get('limit', None)
+        if limit is not None:
+            sql.append('limit')
+            if isinstance(limit, int):
+                sql.append('?')
+                args.append(limit)
+            elif isinstance(limit, tuple) and len(limit) == 2:
+                sql.append('?, ?')
+                args.extend(limit)
+            else:
+                raise ValueError('Invalid limit value: %s' % str(limit))
+        rs = await select(' '.join(sql), args)
+        return [cls(**r) for r in rs]
+
+    # 主键查找的方法
+    @classmethod
+    async def find(cls, pk):
+        ' find object by primary key. '
+        rs = await select('%s where `%s`=?' % (cls.__select__, cls.__primary_key__), [pk], 1)
+        if len(rs) == 0:
+            return None
+        return cls(**rs[0])
+
+if __name__ == '__main__':
+    loop=asyncio.get_event_loop()
+    loop.run_until_complete(create_pool(host='127.0.0.1',port=3306,user='root',password='mysql',db='ORM',loop=loop))
+    rs=loop.run_until_complete(select('select * from firstschool',None))
+    print('%s'%rs)
