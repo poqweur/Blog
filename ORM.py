@@ -1,13 +1,22 @@
 import asyncio
 import aiomysql
 import logging
+import sys
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+format = logging.Formatter("%(asctime)s - %(message)s")    # output format
+sh = logging.StreamHandler(stream=sys.stdout)    # output to standard output
+sh.setFormatter(format)
+logger.addHandler(sh)
 
 def log(sql,args=()):
-    logging.info('SQL: %s'%sql)
+    global logger
+    logger.info('SQL: %s'%sql)
 
 #创建数据库链接对象
 async def create_pool(loop,**kwargs):
-    logging.info('create database connection pool...')
+    logger.info('create database connection pool...')
     global __pool
     __pool = await aiomysql.create_pool(
         host=kwargs.get('host','localhost'),
@@ -19,6 +28,13 @@ async def create_pool(loop,**kwargs):
         autocommit=kwargs.get('autocommit',True),
         loop=loop
     )
+
+#销毁连接池
+async def destory_poll():
+    global __pool
+    if __pool is not None:
+        __pool.close()
+        await __pool.wait_closed()
 
 #创建查看方法
 async def select(sql,args,size=None):
@@ -110,10 +126,11 @@ class ModelMetaclass(type):
         fields = []
         primaryKey = None
         for k, v in attrs.items():
+            print('k',k,'v',v)
             if isinstance(v, Field):
-                logging.info(' found mapping:%s ==> %s' % (k, v))
+                # logging.info(' found mapping:%s ==> %s' % (k, v))
                 mappings[k] = v
-                if v.primary_Key:
+                if v.primary_key:
                     # 找到主键
                     if primaryKey:
                         raise RuntimeError('Duplicate primary key for field:%s' % k)
@@ -124,7 +141,7 @@ class ModelMetaclass(type):
         if not primaryKey:
             raise RuntimeError('Primary key not found.')
         for k in mappings.keys():
-            attrs.pop()
+            attrs.pop(k)
         escaped_fields = list(map(lambda f: '`%s`' % f, fields))
         attrs['__mappings__'] = mappings  # 保存属性和列的映射关系
         attrs['__table__'] = tableName
@@ -132,7 +149,7 @@ class ModelMetaclass(type):
         attrs['__fields__'] = fields  # 除主键外的属性名
         # 构造默认的SELECT,INSERT,UPDATE和DELETE语句：
         attrs['__select__']='select `%s`,%s from, `%s`'%(primaryKey, ', '.join(escaped_fields),tableName)
-        attrs['__insert__']='insert into `%s` (%s, `%s`)'%(tableName,', '.join(escaped_fields),primaryKey,create_args_string(len(escaped_fields)+1))
+        attrs['__insert__']='insert into `%s` (%s, `%s`) values(%s)'%(tableName,', '.join(escaped_fields),primaryKey,create_args_string(len(escaped_fields)+1))
         attrs['__update__']='update `%s` set %s where `%s`=?'%(tableName,', '.join(map(lambda f: '`%s`=?' % (mappings.get(f).name or f),fields)),primaryKey)
         attrs['__delete__']='delete from `%s` where `%s`=?' %(tableName,primaryKey)
         return type.__new__(cls,name,bases,attrs)
@@ -179,15 +196,7 @@ class Model(dict, metaclass=ModelMetaclass):
         args.append(self.getValueOrDefault(self.__primary_key__))
         rows=await execute(self.__insert__,args)
         if rows != 1:
-            logging.warn('failed to insert record: affected rows: %s'%rows)
-        await self.destory_poll()
-
-    #销毁连接池
-    async def destory_poll(self):
-        global pool
-        if pool is not None:
-            pool.close()
-            await pool.wait_closed()
+            logging.warning('failed to insert record: affected rows: %s'%rows)
 
     # 新的语法  @classmethod装饰器用于把类里面定义的方法声明为该类的类方法
     @classmethod
@@ -221,11 +230,21 @@ class Model(dict, metaclass=ModelMetaclass):
 
 
 if __name__ == '__main__':
-    import sys
     loop=asyncio.get_event_loop()
+    # import concurrent
+    # executor = concurrent.futures.ThreadPoolExecutor(5)
+    # loop.set_default_executor(executor)
     loop.run_until_complete(create_pool(host='127.0.0.1',port=3306,user='root',password='mysql',db='ORM',loop=loop))
-    rs=loop.run_until_complete(select('select * from firstschool',None))
-    print('%s'%rs)
-    loop.close()
-    if loop.is_closed():
-        sys.exit(0)
+    # # import time
+    # # time.sleep(1)
+    # rs=loop.run_until_complete(select('select * from firstschool',None))
+    # rs=loop.run_until_complete(execute('insert into  firstschool values(2,"aaa")',None))
+
+    # print('%s'%rs)
+    # class aaa(Model):
+    #     id = StringField()
+    #
+    # aaaa = StringField()
+    # print(aaaa.primary_key)
+
+

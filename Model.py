@@ -9,7 +9,8 @@ def next_id():
 class User(Model):
     __table__='users'
 
-    id=StringField(dll='varchar(50)')
+    id=StringField(dll='varchar(50)',primary_key=True,default=next_id)
+    email = StringField(dll='varchar(50)')
     passwd=StringField(dll='varchar(50)')
     admin=BooleanField()
     name=StringField(dll='varchar(50)')
